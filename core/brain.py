@@ -8,6 +8,7 @@ from core.mission_builder import MissionBuilder
 from core.planner import Planner
 from core.executor import Executor
 from core.prometheus import Prometheus
+from core.task_analyzer import TaskAnalyzer
 
 from engines.knowledge import KnowledgeEngine
 from engines.academy import AcademyEngine
@@ -26,6 +27,8 @@ class Brain:
         Utilisateur
              ↓
         MemoryExtractor
+             ↓
+        TaskAnalyzer
              ↓
         Prometheus
              ↓
@@ -104,6 +107,12 @@ class Brain:
         )
 
         # =====================================================
+        # TASK ANALYZER
+        # =====================================================
+
+        self.task_analyzer = TaskAnalyzer()
+
+        # =====================================================
         # PROMETHEUS
         # =====================================================
 
@@ -178,7 +187,10 @@ class Brain:
         # VERIFICATION
         # =====================================================
 
-        if not isinstance(message, str):
+        if not isinstance(
+            message,
+            str
+        ):
 
             raise TypeError(
                 "Le message doit être une chaîne de caractères."
@@ -224,13 +236,49 @@ class Brain:
                     )
 
         # =====================================================
+        # TASK ANALYZER
+        # =====================================================
+
+        analysis = self.task_analyzer.analyze(
+            message,
+            conversation=self.conversation.get_messages()
+        )
+
+        print(
+            "\n===== TASK ANALYZER ====="
+        )
+
+        print(
+            analysis
+        )
+
+        print(
+            "=========================\n"
+        )
+
+        # =====================================================
         # PROMETHEUS
         # =====================================================
 
         plan = self.prometheus.decide(
-            message,
+            analysis,
             conversation=self.conversation.get_messages()
         )
+
+        # =====================================================
+        # AUCUN MOTEUR NECESSAIRE
+        # =====================================================
+
+        if not plan:
+
+            print(
+                "ARGOS : Aucun moteur spécialisé "
+                "nécessaire pour cette requête."
+            )
+
+            return self._fallback(
+                message
+            )
 
         # =====================================================
         # MISSION
@@ -304,7 +352,10 @@ class Brain:
         # RESULTAT DICTIONNAIRE
         # =====================================================
 
-        if isinstance(result, dict):
+        if isinstance(
+            result,
+            dict
+        ):
 
             # -------------------------------------------------
             # REPONSE DIRECTE
@@ -358,7 +409,10 @@ class Brain:
     # FALLBACK
     # =========================================================
 
-    def _fallback(self, message):
+    def _fallback(
+        self,
+        message
+    ):
         """
         Génère une réponse classique lorsque
         les moteurs ne fournissent pas de résultat
@@ -420,8 +474,10 @@ class Brain:
             "engines":
                 self.engine_manager.names(),
 
+            "task_analyzer":
+                self.task_analyzer.summary(),
+
             "prometheus":
                 self.prometheus.summary()
 
         }
-

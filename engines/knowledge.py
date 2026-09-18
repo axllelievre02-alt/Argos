@@ -29,8 +29,17 @@ class KnowledgeEngine(BaseEngine):
         Pourquoi j'aime mon jeu préféré ?
         -> Tu aimes Skies of Arcadia parce que ...
 
+        Quel est mon moteur préféré ?
+        -> Ton moteur préféré est Unreal Engine.
+
         Et pourquoi ?
-        -> résolution à partir de la conversation précédente.
+        -> si la raison existe dans la mémoire :
+           réponse avec la raison.
+
+        -> sinon :
+           Je sais que ton moteur préféré est Unreal Engine,
+           mais je ne connais pas encore la raison pour laquelle
+           tu le préfères.
 
     Architecture :
 
@@ -165,11 +174,46 @@ class KnowledgeEngine(BaseEngine):
                 "mon moteur prefere",
                 "mon moteur préféré",
 
+                "quel est mon moteur",
+                "quelle est mon moteur",
+
                 "quel est mon moteur prefere",
                 "quel est mon moteur préféré",
 
                 "quelle est mon moteur prefere",
                 "quelle est mon moteur préféré"
+
+            ],
+
+            # -------------------------------------------------
+            # RAISON DU MOTEUR PREFERE
+            # -------------------------------------------------
+
+            "favorite_engine_reason": [
+
+                "pourquoi j aime mon moteur prefere",
+                "pourquoi j'aime mon moteur prefere",
+
+                "pourquoi j aime mon moteur préféré",
+                "pourquoi j'aime mon moteur préféré",
+
+                "pourquoi je prefere mon moteur",
+                "pourquoi je préfère mon moteur",
+
+                "pourquoi j aime ce moteur",
+                "pourquoi j'aime ce moteur",
+
+                "raison de mon moteur prefere",
+                "raison de mon moteur préféré",
+
+                "raison pour laquelle j aime mon moteur",
+                "raison pour laquelle j'aime mon moteur",
+
+                "pour quelle raison j aime mon moteur",
+                "pour quelle raison j'aime mon moteur",
+
+                "quelle est la raison de mon moteur prefere",
+                "quelle est la raison de mon moteur préféré"
 
             ],
 
@@ -266,10 +310,6 @@ class KnowledgeEngine(BaseEngine):
             "`",
             "'"
         )
-
-        # Une apostrophe devient un espace.
-        #
-        # "j'aime" -> "j aime"
 
         text = text.replace(
             "'",
@@ -506,7 +546,6 @@ class KnowledgeEngine(BaseEngine):
                 )
 
                 if char_a != char_b:
-
                     substitution += 1
 
                 current.append(
@@ -643,6 +682,36 @@ class KnowledgeEngine(BaseEngine):
         words = normalized.split()
 
         # -----------------------------------------------------
+        # MOTEUR
+        # -----------------------------------------------------
+
+        has_engine = (
+            self._contains_similar_word(
+                words,
+                [
+                    "moteur",
+                    "engine"
+                ]
+            )
+        )
+
+        if has_engine:
+
+            has_favorite = (
+                self._contains_similar_word(
+                    words,
+                    [
+                        "prefere",
+                        "favori",
+                        "favorit"
+                    ]
+                )
+            )
+
+            if has_favorite:
+                return "favorite_engine"
+
+        # -----------------------------------------------------
         # JEU
         # -----------------------------------------------------
 
@@ -674,23 +743,6 @@ class KnowledgeEngine(BaseEngine):
         if has_game and has_favorite:
 
             return "favorite_game"
-
-        # -----------------------------------------------------
-        # MOTEUR
-        # -----------------------------------------------------
-
-        has_engine = (
-            self._contains_similar_word(
-                words,
-                [
-                    "moteur"
-                ]
-            )
-        )
-
-        if has_engine and has_favorite:
-
-            return "favorite_engine"
 
         # -----------------------------------------------------
         # PROJET
@@ -845,7 +897,7 @@ class KnowledgeEngine(BaseEngine):
         return None
 
     # =========================================================
-    # DERNIER SUJET PERTINENT
+    # DERNIER CHAMP PERTINENT
     # =========================================================
 
     def _get_last_relevant_field(self):
@@ -860,6 +912,14 @@ class KnowledgeEngine(BaseEngine):
 
         de résoudre "pourquoi" vers
         favorite_game_reason.
+
+        Exemple :
+
+            Quel est mon moteur préféré ?
+            Et pourquoi ?
+
+        de résoudre "pourquoi" vers
+        favorite_engine_reason.
         """
 
         messages = (
@@ -874,7 +934,6 @@ class KnowledgeEngine(BaseEngine):
                 item,
                 dict
             ):
-
                 continue
 
             role = item.get(
@@ -898,6 +957,69 @@ class KnowledgeEngine(BaseEngine):
             )
 
             if field:
+
+                return field
+
+        return None
+
+    # =========================================================
+    # DERNIER SUJET CONNU
+    # =========================================================
+
+    def _get_last_known_personal_field(self):
+        """
+        Cherche le dernier sujet personnel réellement connu
+        dans le profil.
+
+        Cette méthode permet de résoudre un contexte comme :
+
+            Quel est mon moteur préféré ?
+            Explique-moi ce qu'est Unreal Engine.
+            Et pourquoi ?
+
+        sans inventer de relation entre le sujet général
+        et les informations personnelles.
+        """
+
+        messages = (
+            self._get_conversation()
+        )
+
+        for item in reversed(
+            messages
+        ):
+
+            if not isinstance(
+                item,
+                dict
+            ):
+                continue
+
+            if item.get(
+                "role",
+                ""
+            ) != "user":
+
+                continue
+
+            content = item.get(
+                "content",
+                ""
+            )
+
+            if not content:
+                continue
+
+            field = self.detect_field(
+                content
+            )
+
+            if field is None:
+                continue
+
+            if self._get_value(
+                field
+            ) is not None:
 
                 return field
 
@@ -1035,15 +1157,23 @@ class KnowledgeEngine(BaseEngine):
                     "favorite_engine_reason"
                 )
 
+            if previous_field == "favorite_game_reason":
+
+                return (
+                    "favorite_game_reason"
+                )
+
+            if previous_field == "favorite_engine_reason":
+
+                return (
+                    "favorite_engine_reason"
+                )
+
             return previous_field
 
         # =====================================================
         # REFERENCES COURTES
         # =====================================================
-
-        # Ces formulations ne précisent pas de champ. Elles ne
-        # peuvent donc être résolues que si la conversation porte
-        # déjà sur une information personnelle identifiable.
 
         short_references = {
 
@@ -1086,6 +1216,19 @@ class KnowledgeEngine(BaseEngine):
                 )
 
             # -------------------------------------------------
+            # POURQUOI + MOTEUR
+            # -------------------------------------------------
+
+            if (
+                "moteur" in normalized
+                or "engine" in normalized
+            ):
+
+                return (
+                    "favorite_engine_reason"
+                )
+
+            # -------------------------------------------------
             # Exemple :
             #
             # "Pourquoi j'aime ça ?"
@@ -1102,6 +1245,12 @@ class KnowledgeEngine(BaseEngine):
 
                 return (
                     "favorite_game_reason"
+                )
+
+            if previous_field == "favorite_engine":
+
+                return (
+                    "favorite_engine_reason"
                 )
 
         return None
@@ -1159,17 +1308,14 @@ class KnowledgeEngine(BaseEngine):
                 "."
             )
 
-            # Les raisons apprises depuis un message utilisateur
-            # sont souvent formulées à la première personne.
-            # La réponse d'ARGOS s'adresse à l'utilisateur :
-            # elle doit donc employer la deuxième personne.
-
             first_person_replacements = {
+
                 "je l'adore": "tu l'adores",
                 "je l'aime": "tu l'aimes",
                 "j'adore": "tu adores",
                 "j'aime": "tu aimes",
                 "je préfère": "tu préfères"
+
             }
 
             reason_lower = reason.lower()
@@ -1209,6 +1355,60 @@ class KnowledgeEngine(BaseEngine):
             return (
                 f"Ton moteur préféré "
                 f"est {value}."
+            )
+
+        # -----------------------------------------------------
+        # RAISON DU MOTEUR PREFERE
+        # -----------------------------------------------------
+
+        if field == "favorite_engine_reason":
+
+            engine = self._get_value(
+                "favorite_engine"
+            )
+
+            reason = str(
+                value
+            ).strip().rstrip(
+                "."
+            )
+
+            first_person_replacements = {
+
+                "je l'adore": "tu l'adores",
+                "je l'aime": "tu l'aimes",
+                "j'adore": "tu adores",
+                "j'aime": "tu aimes",
+                "je préfère": "tu préfères"
+
+            }
+
+            reason_lower = reason.lower()
+
+            for first_person, second_person in (
+                first_person_replacements.items()
+            ):
+
+                if reason_lower.startswith(
+                    first_person
+                ):
+
+                    reason = (
+                        second_person +
+                        reason[len(first_person):]
+                    )
+
+                    break
+
+            if engine:
+
+                return (
+                    f"Tu préfères {engine} "
+                    f"parce que {reason}."
+                )
+
+            return (
+                reason + "."
             )
 
         # -----------------------------------------------------
@@ -1269,10 +1469,6 @@ class KnowledgeEngine(BaseEngine):
             "answer": answer,
 
             "value": value,
-
-            # -------------------------------------------------
-            # Compatibilité Brain / ResponseManager
-            # -------------------------------------------------
 
             "content": answer
 
@@ -1342,7 +1538,7 @@ class KnowledgeEngine(BaseEngine):
         if value is None:
 
             # -------------------------------------------------
-            # Cas spécial : raison du jeu
+            # RAISON DU JEU
             # -------------------------------------------------
 
             if field == "favorite_game_reason":
@@ -1368,6 +1564,38 @@ class KnowledgeEngine(BaseEngine):
                         "la raison pour laquelle "
                         "tu aimes ce jeu."
                     )
+
+            # -------------------------------------------------
+            # RAISON DU MOTEUR
+            # -------------------------------------------------
+
+            elif field == "favorite_engine_reason":
+
+                engine = self._get_value(
+                    "favorite_engine"
+                )
+
+                if engine:
+
+                    answer = (
+                        f"Je sais que ton moteur "
+                        f"préféré est {engine}, "
+                        "mais je ne connais pas "
+                        "encore la raison pour "
+                        "laquelle tu le préfères."
+                    )
+
+                else:
+
+                    answer = (
+                        "Je ne connais pas encore "
+                        "la raison pour laquelle "
+                        "tu préfères ce moteur."
+                    )
+
+            # -------------------------------------------------
+            # AUTRE INFORMATION INCONNUE
+            # -------------------------------------------------
 
             else:
 
@@ -1504,4 +1732,3 @@ class KnowledgeEngine(BaseEngine):
         return self.answer(
             message
         )
-

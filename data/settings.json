@@ -1,0 +1,46 @@
+{
+    "version": 1,
+    "models": {
+        "default": "qwen3:4b",
+        "routes": {
+            "general": "qwen3:4b",
+            "code": "qwen3:4b",
+            "reasoning": "qwen3:4b",
+            "fast": "qwen3:4b"
+        },
+        "local_only": true,
+        "timeout": 120
+    },
+    "permissions": {
+        "level": 1,
+        "confirm_from": 2,
+        "extra_allowed_paths": []
+    },
+    "modes": {
+        "current": "normal"
+    },
+    "interface": {
+        "user_label": "Ikaris",
+        "assistant_label": "ARGOS",
+        "language": "fr"
+    },
+    "voice": {
+        "enabled": false,
+        "rate": 175,
+        "volume": 0.9
+    },
+    "memory": {
+        "persist_conversation": true,
+        "max_messages": 50,
+        "long_term": true,
+        "learn_from_internet": true
+    },
+    "tools": {
+        "enabled": true,
+        "timeout": 60
+    },
+    "verification": {
+        "enabled": true,
+        "max_attempts": 3
+    }
+}

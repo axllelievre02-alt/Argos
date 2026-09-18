@@ -1,361 +1,573 @@
 class Prometheus:
     """
-    Système de décision d'ARGOS.
+    Centre de décision d'ARGOS.
 
-    Prometheus analyse la requête utilisateur et détermine
-    quels moteurs doivent intervenir.
+    Prometheus reçoit l'analyse produite par TaskAnalyzer
+    et décide quels moteurs sont nécessaires.
 
-    Il ne répond jamais à l'utilisateur.
+    Prometheus ne fait PAS exécuter les moteurs.
 
-    Il produit uniquement un plan d'exécution.
+    Pipeline :
 
-    Principe :
-
-        - requête simple -> un moteur
-        - requête complexe -> plusieurs moteurs
-        - requête dépendant de la mémoire -> Knowledge
-        - requête nécessitant une explication -> Academy
-        - requête contextuelle -> analyse de la conversation
-
-    Prometheus ne génère jamais la réponse finale.
+        TaskAnalyzer
+             ↓
+        Prometheus
+             ↓
+        MissionBuilder
+             ↓
+        Planner
+             ↓
+        Executor
     """
 
-    def __init__(
+    def __init__(self, available_engines=None):
+
+        self.available_engines = list(
+            available_engines or []
+        )
+
+        self.last_plan = None
+
+    # =========================================================
+    # DECISION
+    # =========================================================
+
+    def decide(
         self,
-        available_engines=None
+        analysis,
+        conversation=None
     ):
+        """
+        Détermine les moteurs nécessaires à partir
+        de l'analyse produite par TaskAnalyzer.
 
-        self.available_engines = (
-            set(available_engines)
-            if available_engines is not None
-            else None
-        )
+        Paramètres :
 
-        self.rules = [
+            analysis :
+                dictionnaire produit par TaskAnalyzer.
 
-            # =================================================
-            # INTERNET
-            # =================================================
+            conversation :
+                historique conversationnel éventuel.
 
-            {
-                "engine": "internet",
+        Retourne :
 
-                "keywords": [
-                    "internet",
-                    "web",
-                    "google",
-                    "cherche",
-                    "recherche",
-                    "actualité",
-                    "actualités",
-                    "news",
-                    "site",
-                    "en ligne"
-                ]
-            },
-
-            # =================================================
-            # CODE
-            # =================================================
-
-            {
-                "engine": "code",
-
-                "keywords": [
-                    "python",
-                    "code",
-                    "bug",
-                    "erreur",
-                    "corrige",
-                    "corriger",
-                    "fonction",
-                    "classe",
-                    "algorithme",
-                    "programmation",
-                    "programme",
-                    "script",
-                    "développer",
-                    "développement"
-                ]
-            },
-
-            # =================================================
-            # ACADEMY
-            # =================================================
-
-            {
-                "engine": "academy",
-
-                "keywords": [
-                    "explique",
-                    "pourquoi",
-                    "comment",
-                    "cours",
-                    "définition",
-                    "definition",
-                    "c'est quoi",
-                    "apprends",
-                    "apprendre",
-                    "comprends",
-                    "comprendre"
-                ]
-            },
-
-            # =================================================
-            # KNOWLEDGE
-            # =================================================
-
-            {
-                "engine": "knowledge",
-
-                "keywords": [
-                    "je m'appelle",
-                    "je m appelle",
-                    "mon nom",
-                    "qui suis-je",
-                    "qui suis je",
-                    "mon jeu préféré",
-                    "mon jeu prefere",
-                    "mon jeux préféré",
-                    "mon jeux prefere",
-                    "mon moteur préféré",
-                    "mon moteur prefere",
-                    "mon projet",
-                    "mon projet actuel",
-                    "sur quoi je travaille",
-                    "que sais-tu sur moi",
-                    "que sais tu sur moi",
-                    "qu'est-ce que tu sais sur moi",
-                    "qu est ce que tu sais sur moi",
-                    "mes informations"
-                ]
-            }
-        ]
-
-    # =========================================================
-    # NORMALISATION
-    # =========================================================
-
-    @staticmethod
-    def normalize(text):
-
-        if not isinstance(text, str):
-            return ""
-
-        text = text.lower().strip()
-
-        text = (
-            text
-            .replace("’", "'")
-            .replace("`", "'")
-        )
-
-        text = text.replace(
-            "'",
-            " "
-        )
-
-        return " ".join(
-            text.split()
-        )
-
-    # =========================================================
-    # DETECTION KNOWLEDGE
-    # =========================================================
-
-    def _is_knowledge_request(self, text):
-
-        text = self.normalize(
-            text
-        )
+            une liste de tâches destinée au MissionBuilder.
+        """
 
         # -----------------------------------------------------
-        # Expressions directes
+        # Vérification
         # -----------------------------------------------------
 
-        knowledge_patterns = [
-
-            "quel est mon",
-            "quelle est mon",
-            "quels sont mes",
-            "quelles sont mes",
-
-            "quel est ma",
-            "quelle est ma",
-
-            "mon jeu prefere",
-            "mon jeu préféré",
-
-            "mon jeux prefere",
-            "mon jeux préféré",
-
-            "mon moteur prefere",
-            "mon moteur préféré",
-
-            "mon projet",
-            "mon projet actuel",
-
-            "sur quoi je travaille",
-
-            "que sais tu sur moi",
-            "que sais-tu sur moi",
-
-            "qu est ce que tu sais sur moi",
-            "qu'est ce que tu sais sur moi",
-
-            "mes informations",
-
-            "comment je m appelle",
-            "comment je m'appelle",
-
-            "qui suis je",
-            "qui suis-je"
-        ]
-
-        if any(
-            pattern in text
-            for pattern in knowledge_patterns
+        if not isinstance(
+            analysis,
+            dict
         ):
-            return True
 
-        # -----------------------------------------------------
-        # Détection de questions personnelles avec
-        # tolérance légère aux formulations différentes.
-        # -----------------------------------------------------
-
-        personal_words = [
-            "mon",
-            "ma",
-            "mes"
-        ]
-
-        personal_subjects = [
-            "jeu",
-            "jeux",
-            "moteur",
-            "projet",
-            "nom",
-            "prenom",
-            "prénom",
-            "information",
-            "informations"
-        ]
-
-        has_personal = any(
-            word in text.split()
-            for word in personal_words
-        )
-
-        has_subject = any(
-            word in text.split()
-            for word in personal_subjects
-        )
-
-        if has_personal and has_subject:
-            return True
-
-        return False
-
-    # =========================================================
-    # DETECTION ACADEMY
-    # =========================================================
-
-    def _is_academy_request(self, text):
-
-        text = self.normalize(
-            text
-        )
-
-        academy_patterns = [
-
-            "explique",
-            "pourquoi",
-            "comment",
-            "cours",
-            "definition",
-            "définition",
-            "c est quoi",
-            "c'est quoi",
-            "apprends",
-            "apprendre",
-            "comprends",
-            "comprendre"
-
-        ]
-
-        return any(
-            pattern in text
-            for pattern in academy_patterns
-        )
-
-    # =========================================================
-    # ANALYSE INTERNET / CODE
-    # =========================================================
-
-    def _get_standard_engines(self, text):
-
-        plan = []
-
-        for rule in self.rules:
-
-            engine = rule["engine"]
-
-            if engine in [
-                "knowledge",
-                "academy"
-            ]:
-                continue
-
-            if (
-                self.available_engines is not None
-                and engine not in self.available_engines
-            ):
-                continue
-
-            matched = any(
-
-                keyword in text
-
-                for keyword in rule["keywords"]
-
+            raise TypeError(
+                "L'analyse doit être un dictionnaire."
             )
 
-            if matched:
+        # -----------------------------------------------------
+        # Récupération des informations
+        # -----------------------------------------------------
 
-                plan.append(
+        intent = analysis.get(
+            "intent",
+            "general"
+        )
+
+        goal = analysis.get(
+            "goal",
+            ""
+        )
+
+        message = analysis.get(
+            "normalized_message",
+            ""
+        )
+
+        signals = analysis.get(
+            "signals",
+            {}
+        )
+
+        has_conversation = bool(
+            conversation
+        )
+
+        # -----------------------------------------------------
+        # Liste des tâches
+        # -----------------------------------------------------
+
+        tasks = []
+
+        # =====================================================
+        # CONNAISSANCE PERSONNELLE
+        # =====================================================
+
+        if intent == "knowledge":
+
+            if self._engine_available(
+                "knowledge"
+            ):
+
+                tasks.append(
                     {
-                        "engine": engine,
+                        "engine": "knowledge",
 
-                        "description":
-                            f"Utiliser {engine}",
+                        "description": (
+                            "Récupérer les informations "
+                            "pertinentes dans la mémoire "
+                            "d'ARGOS."
+                        ),
 
-                        "priority":
-                            len(plan) + 1
+                        "priority": 1
                     }
                 )
 
-        return plan
+        # =====================================================
+        # INTERNET
+        # =====================================================
+
+        elif intent == "internet":
+
+            if self._engine_available(
+                "internet"
+            ):
+
+                tasks.append(
+                    {
+                        "engine": "internet",
+
+                        "description": (
+                            "Rechercher sur Internet "
+                            "les informations actuelles "
+                            "nécessaires pour répondre."
+                        ),
+
+                        "priority": 1
+                    }
+                )
+
+        # =====================================================
+        # CODE
+        # =====================================================
+
+        elif intent == "code":
+
+            if self._engine_available(
+                "code"
+            ):
+
+                tasks.append(
+                    {
+                        "engine": "code",
+
+                        "description": (
+                            "Analyser ou produire "
+                            "du code selon la demande."
+                        ),
+
+                        "priority": 1
+                    }
+                )
+
+        # =====================================================
+        # ACADEMIE
+        # =====================================================
+
+        elif intent == "academy":
+
+            # -------------------------------------------------
+            # Demande contextuelle avec historique
+            # -------------------------------------------------
+
+            if (
+                signals.get("contextual", False)
+                and has_conversation
+            ):
+
+                # -------------------------------------------------
+                # Vérifie si le contexte précédent est personnel.
+                #
+                # Exemple personnel :
+                #
+                #   Quel est mon jeu préféré ?
+                #   Et pourquoi ?
+                #
+                # Dans ce cas :
+                #
+                #   knowledge
+                #        ↓
+                #   academy
+                #
+                # -------------------------------------------------
+
+                personal_context = (
+                    self._conversation_is_personal(
+                        conversation
+                    )
+                )
+
+                # -------------------------------------------------
+                # CONTEXTE PERSONNEL
+                # -------------------------------------------------
+
+                if personal_context:
+
+                    if self._engine_available(
+                        "knowledge"
+                    ):
+
+                        tasks.append(
+                            {
+                                "engine": "knowledge",
+
+                                "description": (
+                                    "Récupérer les informations "
+                                    "personnelles nécessaires "
+                                    "à partir de la mémoire."
+                                ),
+
+                                "priority": 1
+                            }
+                        )
+
+                    if self._engine_available(
+                        "academy"
+                    ):
+
+                        tasks.append(
+                            {
+                                "engine": "academy",
+
+                                "description": (
+                                    "Interpréter et expliquer "
+                                    "la demande à partir du "
+                                    "contexte conversationnel "
+                                    "et des résultats précédents."
+                                ),
+
+                                "priority": 2
+                            }
+                        )
+
+                # -------------------------------------------------
+                # CONTEXTE GENERAL
+                #
+                # Exemple :
+                #
+                #   Explique-moi ce qu'est Unreal Engine.
+                #   Et pourquoi ?
+                #
+                # Dans ce cas, aucun KnowledgeEngine.
+                # -------------------------------------------------
+
+                else:
+
+                    if self._engine_available(
+                        "academy"
+                    ):
+
+                        tasks.append(
+                            {
+                                "engine": "academy",
+
+                                "description": (
+                                    "Interpréter la demande "
+                                    "à partir du contexte "
+                                    "conversationnel et "
+                                    "produire une explication."
+                                ),
+
+                                "priority": 1
+                            }
+                        )
+
+            # -------------------------------------------------
+            # Demande d'explication normale
+            # -------------------------------------------------
+
+            else:
+
+                if self._engine_available(
+                    "academy"
+                ):
+
+                    tasks.append(
+                        {
+                            "engine": "academy",
+
+                            "description": (
+                                "Expliquer, enseigner ou "
+                                "analyser la demande "
+                                "de manière pédagogique."
+                            ),
+
+                            "priority": 1
+                        }
+                    )
+
+        # =====================================================
+        # DEMANDE CONTEXTUELLE
+        # =====================================================
+
+        elif intent == "contextual":
+
+            if has_conversation:
+
+                # -------------------------------------------------
+                # Détermine si le contexte est personnel.
+                # -------------------------------------------------
+
+                personal_context = (
+                    self._conversation_is_personal(
+                        conversation
+                    )
+                )
+
+                # -------------------------------------------------
+                # CONTEXTE PERSONNEL
+                # -------------------------------------------------
+
+                if personal_context:
+
+                    if self._engine_available(
+                        "knowledge"
+                    ):
+
+                        tasks.append(
+                            {
+                                "engine": "knowledge",
+
+                                "description": (
+                                    "Récupérer les informations "
+                                    "pertinentes dans la mémoire "
+                                    "d'ARGOS."
+                                ),
+
+                                "priority": 1
+                            }
+                        )
+
+                    if self._engine_available(
+                        "academy"
+                    ):
+
+                        tasks.append(
+                            {
+                                "engine": "academy",
+
+                                "description": (
+                                    "Interpréter la demande "
+                                    "à partir du contexte "
+                                    "conversationnel."
+                                ),
+
+                                "priority": 2
+                            }
+                        )
+
+                # -------------------------------------------------
+                # CONTEXTE GENERAL
+                # -------------------------------------------------
+
+                else:
+
+                    if self._engine_available(
+                        "academy"
+                    ):
+
+                        tasks.append(
+                            {
+                                "engine": "academy",
+
+                                "description": (
+                                    "Interpréter la demande "
+                                    "à partir du contexte "
+                                    "conversationnel."
+                                ),
+
+                                "priority": 1
+                            }
+                        )
+
+        # =====================================================
+        # DEMANDE GENERALE
+        # =====================================================
+
+        elif intent == "general":
+
+            # -------------------------------------------------
+            # Une demande générale ne force aucun moteur.
+            #
+            # Le ResponseManager pourra répondre directement.
+            # -------------------------------------------------
+
+            pass
+
+        # =====================================================
+        # PLAN
+        # =====================================================
+
+        self.last_plan = {
+            "goal": goal,
+            "message": message,
+            "tasks": tasks
+        }
+
+        # =====================================================
+        # DEBUG
+        # =====================================================
+
+        print(
+            "\n===== PLAN D'ACTION ====="
+        )
+
+        print(
+            "Objectif :",
+            goal or "Traiter la requête utilisateur."
+        )
+
+        if not tasks:
+
+            print(
+                "Aucun moteur spécialisé sélectionné."
+            )
+
+        else:
+
+            for index, task in enumerate(
+                tasks,
+                start=1
+            ):
+
+                print(
+                    f"{index}. "
+                    f"{task['engine']}"
+                )
+
+                print(
+                    f"   ↳ "
+                    f"{task['description']}"
+                )
+
+                print(
+                    f"   Priorité : "
+                    f"{task['priority']}"
+                )
+
+        print(
+            "=========================\n"
+        )
+
+        return tasks
 
     # =========================================================
-    # ANALYSE CONTEXTUELLE
+    # ANALYSE DU CONTEXTE CONVERSATIONNEL
     # =========================================================
 
-    def _conversation_text(
+    def _conversation_is_personal(
         self,
         conversation
     ):
+        """
+        Détermine si le contexte récent concerne
+        une information personnelle mémorisable.
+
+        Cette méthode ne décide pas du moteur.
+        Elle sert uniquement à savoir si KnowledgeEngine
+        est nécessaire lorsqu'une demande est contextuelle.
+
+        Exemples personnels :
+
+            Quel est mon jeu préféré ?
+            Quel est mon moteur préféré ?
+            Quel est mon projet ?
+            Quel est mon nom ?
+
+        Exemples non personnels :
+
+            Explique-moi Unreal Engine.
+            Quelle est la dernière version d'Unreal Engine ?
+            Pourquoi Unreal Engine est-il utilisé ?
+        """
+
+        if not isinstance(
+            conversation,
+            list
+        ):
+
+            return False
 
         if not conversation:
-            return ""
 
-        result = ""
+            return False
 
-        for item in conversation:
+        # -----------------------------------------------------
+        # On examine les derniers messages utilisateur.
+        # -----------------------------------------------------
+
+        recent_messages = conversation[-8:]
+
+        personal_patterns = [
+
+            # Identité
+            "quel est mon nom",
+            "quel est mon prénom",
+            "quel est mon prenom",
+            "comment je m'appelle",
+            "comment je m appelle",
+            "qui suis-je",
+            "qui suis je",
+
+            # Jeu préféré
+            "quel est mon jeu préféré",
+            "quel est mon jeu prefere",
+            "quel est mon jeu favori",
+            "quel est mon jeu favoris",
+            "mon jeu préféré",
+            "mon jeu prefere",
+            "mon jeu favori",
+
+            # Moteur préféré
+            "quel est mon moteur préféré",
+            "quel est mon moteur prefere",
+            "quel est mon moteur favori",
+            "mon moteur préféré",
+            "mon moteur prefere",
+            "mon moteur favori",
+
+            # Projet
+            "quel est mon projet",
+            "quel est mon projet actuel",
+            "mon projet",
+            "mon projet actuel",
+            "sur quel projet je travaille",
+            "sur quoi je travaille",
+
+            # Informations personnelles
+            "mes informations",
+            "mes préférences",
+            "mes preferences",
+            "sur moi",
+
+        ]
+
+        # -----------------------------------------------------
+        # Parcours inverse :
+        # on cherche d'abord le dernier sujet personnel.
+        # -----------------------------------------------------
+
+        for item in reversed(
+            recent_messages
+        ):
 
             if not isinstance(
                 item,
                 dict
             ):
+
                 continue
 
             role = item.get(
@@ -368,332 +580,190 @@ class Prometheus:
                 ""
             )
 
-            if not content:
+            if role != "user":
+
                 continue
 
-            result += (
-                f"{role}: {content}\n"
-            )
+            if not isinstance(
+                content,
+                str
+            ):
 
-        return self.normalize(
-            result
-        )
+                continue
+
+            text = content.lower().strip()
+
+            # -------------------------------------------------
+            # Question contextuelle elle-même
+            #
+            # "Et pourquoi ?" ne permet pas de déterminer
+            # le sujet. On continue donc vers le message
+            # utilisateur précédent.
+            # -------------------------------------------------
+
+            if self._is_contextual_message(
+                text
+            ):
+
+                continue
+
+            # -------------------------------------------------
+            # Vérification sujet personnel
+            # -------------------------------------------------
+
+            for pattern in personal_patterns:
+
+                if pattern in text:
+
+                    return True
+
+            # -------------------------------------------------
+            # Si le dernier vrai message utilisateur n'est
+            # pas personnel, le contexte n'est pas considéré
+            # comme personnel.
+            # -------------------------------------------------
+
+            return False
+
+        return False
 
     # =========================================================
-    # QUESTION CONTEXTUELLE
+    # MESSAGE CONTEXTUEL
     # =========================================================
 
-    def _is_contextual_reference(
+    def _is_contextual_message(
         self,
         text
     ):
+        """
+        Détermine si un message est une courte demande
+        dépendant probablement du message précédent.
+        """
+
+        if not isinstance(
+            text,
+            str
+        ):
+
+            return False
+
+        text = text.strip().lower()
 
         contextual_patterns = [
 
             "et pourquoi",
             "et comment",
-            "pourquoi alors",
-            "et c est pourquoi",
-            "et pourquoi ca",
-            "et pourquoi cela",
-            "pourquoi ca",
-            "pourquoi cela",
-
-            "et ca",
-            "et cela",
-
-            "et lui",
-            "et elle",
-
-            "et ce dernier",
-            "et cette derniere",
-
-            "lequel",
-            "laquelle",
-
             "et alors",
             "et donc",
-            "pourquoi donc",
+            "et ça",
+            "et ca",
+            "et cela",
+            "et lui",
+            "et elle",
+            "lequel",
+            "laquelle",
+            "ce dernier",
+            "cette dernière",
+            "cette derniere",
+            "pourquoi ?",
+            "pourquoi?",
+            "comment ?",
+            "comment?"
 
-            "et toi pourquoi",
-            "et pourquoi ca"
         ]
 
-        return any(
-            pattern in text
-            for pattern in contextual_patterns
-        )
+        for pattern in contextual_patterns:
+
+            if pattern in text:
+
+                return True
+
+        return False
 
     # =========================================================
-    # CONTEXTE KNOWLEDGE
+    # MOTEUR DISPONIBLE
     # =========================================================
 
-    def _context_contains_personal_topic(
+    def _engine_available(
         self,
-        conversation_text
+        name
     ):
+        """
+        Vérifie qu'un moteur est disponible.
+        """
 
-        personal_topics = [
-
-            "jeu prefere",
-            "jeu préféré",
-
-            "jeux prefere",
-            "jeux préféré",
-
-            "jeu favori",
-
-            "moteur prefere",
-            "moteur préféré",
-
-            "projet",
-
-            "mon nom",
-
-            "mon prenom",
-            "mon prénom",
-
-            "je m appelle",
-            "je m'appelle"
-        ]
-
-        return any(
-            topic in conversation_text
-            for topic in personal_topics
-        )
+        return name in self.available_engines
 
     # =========================================================
-    # DECISION
+    # MISE A JOUR DES MOTEURS
     # =========================================================
 
-    def decide(
+    def set_available_engines(
         self,
-        message,
-        conversation=None
+        engines
     ):
+        """
+        Remplace la liste des moteurs disponibles.
+        """
 
-        if not isinstance(
-            message,
-            str
-        ):
+        if engines is None:
 
-            raise TypeError(
-                "Le message doit être une chaîne."
-            )
+            self.available_engines = []
 
-        text = self.normalize(
-            message
+            return
+
+        self.available_engines = list(
+            engines
         )
-
-        if not text:
-            return []
-
-        conversation = (
-            conversation or []
-        )
-
-        conversation_text = (
-            self._conversation_text(
-                conversation
-            )
-        )
-
-        # =====================================================
-        # DETECTION PRINCIPALE
-        # =====================================================
-
-        is_knowledge = (
-            self._is_knowledge_request(
-                text
-            )
-        )
-
-        is_academy = (
-            self._is_academy_request(
-                text
-            )
-        )
-
-        is_contextual = (
-            self._is_contextual_reference(
-                text
-            )
-        )
-
-        # =====================================================
-        # CAS 1
-        # QUESTION CONTEXTUELLE
-        #
-        # "Quel est mon jeu préféré ?"
-        # "Et pourquoi ?"
-        #
-        # => Knowledge doit récupérer la mémoire.
-        # =====================================================
-
-        if is_contextual:
-
-            if self._context_contains_personal_topic(
-                conversation_text
-            ):
-
-                plan = [
-
-                    {
-                        "engine": "knowledge",
-
-                        "description":
-                            "Récupérer les informations "
-                            "personnelles pertinentes "
-                            "dans la mémoire d'ARGOS.",
-
-                        "priority": 1
-                    }
-
-                ]
-
-                if is_academy:
-
-                    plan.append(
-                        {
-                            "engine": "academy",
-
-                            "description":
-                                "Expliquer la référence personnelle "
-                                "à partir du contexte d'ARGOS.",
-
-                            "priority": 2
-                        }
-                    )
-
-                return plan
-
-        # =====================================================
-        # CAS 2
-        # KNOWLEDGE + ACADEMY
-        #
-        # IMPORTANT :
-        #
-        # Une question comme :
-        #
-        # "Pourquoi j'aime mon jeu préféré ?"
-        #
-        # est d'abord une question de mémoire.
-        #
-        # On ne doit PAS automatiquement envoyer la
-        # requête vers Academy simplement parce qu'elle
-        # contient "pourquoi".
-        # =====================================================
-
-        if is_knowledge:
-
-            plan = [
-
-                {
-                    "engine": "knowledge",
-
-                    "description":
-                        "Récupérer les informations pertinentes "
-                        "dans la mémoire d'ARGOS.",
-
-                    "priority": 1
-                }
-
-            ]
-
-            if is_academy:
-
-                plan.append(
-                    {
-                        "engine": "academy",
-
-                        "description":
-                            "Synthétiser l'information personnelle "
-                            "dans une réponse pédagogique.",
-
-                        "priority": 2
-                    }
-                )
-
-            return plan
-
-        # =====================================================
-        # CAS 3
-        # ACADEMY
-        # =====================================================
-
-        plan = self._get_standard_engines(
-            text
-        )
-
-        # =====================================================
-        # CAS 3
-        # ACADEMY, SEUL OU APRES UN AUTRE MOTEUR
-        # =====================================================
-
-        if is_academy:
-
-            plan.append(
-                {
-                    "engine": "academy",
-
-                    "description":
-                        "Expliquer, enseigner ou analyser "
-                        "la demande de l'utilisateur.",
-
-                    "priority": len(plan) + 1
-                }
-            )
-
-        if plan:
-            return plan
-
-        # =====================================================
-        # CAS 4
-        # DEFAULT
-        # =====================================================
-
-        return [
-
-            {
-                "engine": "knowledge",
-
-                "description":
-                    "Vérifier si la requête peut être "
-                    "résolue à partir des connaissances "
-                    "et du contexte d'ARGOS.",
-
-                "priority": 1
-            }
-
-        ]
 
     # =========================================================
-    # CAPACITES
+    # AJOUT D'UN MOTEUR
     # =========================================================
 
-    def capabilities(self):
+    def add_engine(
+        self,
+        name
+    ):
+        """
+        Ajoute un moteur disponible.
+        """
 
-        return [
+        if name not in self.available_engines:
 
-            rule["engine"]
-
-            for rule in self.rules
-
-        ]
+            self.available_engines.append(
+                name
+            )
 
     # =========================================================
-    # DEBUG
+    # SUPPRESSION D'UN MOTEUR
+    # =========================================================
+
+    def remove_engine(
+        self,
+        name
+    ):
+        """
+        Retire un moteur disponible.
+        """
+
+        if name in self.available_engines:
+
+            self.available_engines.remove(
+                name
+            )
+
+    # =========================================================
+    # INFORMATIONS
     # =========================================================
 
     def summary(self):
 
         return {
+            "available_engines":
+                list(
+                    self.available_engines
+                ),
 
-            "rules":
-                len(self.rules),
-
-            "capabilities":
-                self.capabilities()
-
+            "last_plan":
+                self.last_plan
         }
-

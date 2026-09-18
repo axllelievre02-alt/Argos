@@ -1,201 +1,32 @@
-from html import unescape
-from urllib.parse import parse_qs, quote_plus, unquote, urlparse
-from urllib.request import Request, urlopen
+from typing import Any, Dict, List
 
-import re
+from ddgs import DDGS
 
 from core.base_engine import BaseEngine
 
 
 class InternetEngine(BaseEngine):
     """
-    Recherche des sources web publiques pour ARGOS.
+    Moteur Internet d'ARGOS.
 
-    Le moteur ne produit pas lui-même la réponse finale. Il renvoie
-    des résultats structurés que ResponseManager peut faire
-    synthétiser par le modèle.
+    Effectue des recherches Web avec DDGS et fournit
+    les résultats au Context utilisé par ARGOS.
     """
 
-    def __init__(
-        self,
-        max_results=5,
-        timeout=8,
-        search_provider=None
-    ):
+    def __init__(self, max_results: int = 5):
 
         super().__init__(
             name="internet",
-            priority=1,
             capabilities=[
-                "internet",
                 "web_search",
-                "current_information"
-            ]
+                "internet",
+                "search",
+                "recherche_web",
+            ],
+            priority=10,
         )
 
         self.max_results = max_results
-        self.timeout = timeout
-        self.search_provider = search_provider
-
-    # =========================================================
-    # RECHERCHE
-    # =========================================================
-
-    def search(self, query):
-        """Retourne une liste de résultats web normalisés."""
-
-        if self.search_provider is not None:
-
-            results = self.search_provider(
-                query,
-                self.max_results
-            )
-
-            return self._normalize_results(
-                results
-            )
-
-        url = (
-            "https://html.duckduckgo.com/html/?q="
-            + quote_plus(query)
-        )
-
-        request = Request(
-            url,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 "
-                    "(compatible; ARGOS/1.0)"
-                )
-            }
-        )
-
-        with urlopen(
-            request,
-            timeout=self.timeout
-        ) as response:
-
-            html = response.read().decode(
-                "utf-8",
-                errors="replace"
-            )
-
-        return self._parse_duckduckgo_results(
-            html
-        )
-
-    def _parse_duckduckgo_results(self, html):
-
-        pattern = re.compile(
-            r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>'
-            r'(.*?)</a>'
-            r'.*?(?:class="result__snippet"[^>]*>(.*?)</(?:a|div)>|'
-            r'class="result__snippet"[^>]*>(.*?)</div>)',
-            re.DOTALL
-        )
-
-        results = []
-
-        for match in pattern.finditer(html):
-
-            href = self._extract_result_url(
-                unescape(match.group(1))
-            )
-
-            title = self._clean_html(
-                match.group(2)
-            )
-
-            snippet = self._clean_html(
-                match.group(3) or match.group(4) or ""
-            )
-
-            if not href or not title:
-                continue
-
-            results.append(
-                {
-                    "title": title,
-                    "url": href,
-                    "snippet": snippet
-                }
-            )
-
-            if len(results) >= self.max_results:
-                break
-
-        return results
-
-    @staticmethod
-    def _extract_result_url(href):
-
-        parsed = urlparse(href)
-
-        if parsed.path.startswith("/l/"):
-
-            target = parse_qs(
-                parsed.query
-            ).get(
-                "uddg",
-                [""]
-            )[0]
-
-            return unquote(target)
-
-        return href
-
-    @staticmethod
-    def _clean_html(value):
-
-        value = re.sub(
-            r"<[^>]+>",
-            " ",
-            value or ""
-        )
-
-        return " ".join(
-            unescape(value).split()
-        )
-
-    def _normalize_results(self, results):
-
-        if not isinstance(results, list):
-            return []
-
-        normalized = []
-
-        for result in results:
-
-            if not isinstance(result, dict):
-                continue
-
-            title = str(
-                result.get("title", "")
-            ).strip()
-
-            url = str(
-                result.get("url", "")
-            ).strip()
-
-            snippet = str(
-                result.get("snippet", "")
-            ).strip()
-
-            if not title or not url:
-                continue
-
-            normalized.append(
-                {
-                    "title": title,
-                    "url": url,
-                    "snippet": snippet
-                }
-            )
-
-            if len(normalized) >= self.max_results:
-                break
-
-        return normalized
 
     # =========================================================
     # EXECUTION
@@ -204,26 +35,116 @@ class InternetEngine(BaseEngine):
     def execute(
         self,
         message,
-        context=None
+        context
     ):
+        """
+        Méthode appelée par EngineManager.
 
-        if not isinstance(message, str):
-            return None
+        Pipeline :
 
-        query = message.strip()
+            Executor
+                ↓
+            EngineManager
+                ↓
+            InternetEngine.execute()
+                ↓
+            DDGS
+        """
+
+        query = self._extract_query(
+            message
+        )
 
         if not query:
-            return None
+
+            return {
+                "mode": "internet",
+                "query": "",
+                "results": [],
+                "error": (
+                    "Aucune requête Internet fournie."
+                ),
+                "content": None,
+                "prompt_context": (
+                    "RECHERCHE WEB ARGOS\n\n"
+                    "Aucune requête de recherche "
+                    "n'a été fournie."
+                ),
+            }
 
         try:
 
-            results = self.search(
+            results = self._search(
                 query
             )
 
+            # -------------------------------------------------
+            # Aucun résultat
+            # -------------------------------------------------
+
+            if not results:
+
+                return {
+                    "mode": "internet",
+                    "query": query,
+                    "results": [],
+                    "error": None,
+                    "content": None,
+                    "prompt_context": (
+                        "RECHERCHE WEB ARGOS\n\n"
+                        f"Requête : {query}\n\n"
+                        "Aucun résultat exploitable "
+                        "n'a été trouvé."
+                    ),
+                }
+
+            # -------------------------------------------------
+            # Résultats trouvés
+            # -------------------------------------------------
+
+            content = self._build_content(
+                results
+            )
+
+            prompt_context = (
+                self._build_prompt_context(
+                    query,
+                    results
+                )
+            )
+
+            return {
+                "mode": "internet",
+                "query": query,
+                "results": results,
+                "error": None,
+                "content": None,
+                "prompt_context": prompt_context,
+            }
+
         except Exception as error:
 
-            result = {
+            try:
+
+                context.add_error(
+                    f"internet : {error}"
+                )
+
+            except Exception:
+
+                pass
+
+            try:
+
+                context.log(
+                    f"Erreur InternetEngine : {error}"
+                )
+
+            except Exception:
+
+                pass
+
+            return {
                 "mode": "internet",
                 "query": query,
                 "results": [],
@@ -232,81 +153,216 @@ class InternetEngine(BaseEngine):
                 "prompt_context": (
                     "RECHERCHE WEB ARGOS\n\n"
                     f"Requête : {query}\n\n"
-                    "La recherche web a échoué. "
-                    "Ne prétends pas disposer de résultats."
-                )
+                    "Une erreur est survenue pendant "
+                    f"la recherche Internet : {error}"
+                ),
             }
 
-            if context is not None:
-                context.set("internet", result)
+    # =========================================================
+    # EXTRACTION DE LA REQUETE
+    # =========================================================
 
-            return result
+    def _extract_query(
+        self,
+        message: Any
+    ) -> str:
+        """
+        Récupère la requête utilisateur.
+        """
 
-        result = {
-            "mode": "internet",
-            "query": query,
-            "results": results,
-            "error": None,
-            "content": None,
-            "prompt_context": self._build_prompt_context(
-                query,
-                results
-            )
-        }
+        if message is None:
 
-        if context is not None:
+            return ""
 
-            context.set("internet", result)
-            context.set("internet_results", results)
+        if isinstance(
+            message,
+            dict
+        ):
 
-        return result
-
-    @staticmethod
-    def _build_prompt_context(query, results):
-
-        lines = [
-            "RECHERCHE WEB ARGOS",
-            "",
-            f"Requête : {query}",
-            ""
-        ]
-
-        if not results:
-
-            lines.append(
-                "Aucun résultat exploitable n'a été trouvé."
+            query = (
+                message.get("query")
+                or message.get("message")
+                or message.get("text")
+                or message.get("content")
+                or message.get("input")
+                or ""
             )
 
-            return "\n".join(lines)
+            return str(
+                query
+            ).strip()
 
-        lines.append("SOURCES TROUVÉES :")
-        lines.append("")
+        query = getattr(
+            message,
+            "query",
+            None
+        )
+
+        if query:
+
+            return str(
+                query
+            ).strip()
+
+        text = getattr(
+            message,
+            "text",
+            None
+        )
+
+        if text:
+
+            return str(
+                text
+            ).strip()
+
+        return str(
+            message
+        ).strip()
+
+    # =========================================================
+    # RECHERCHE INTERNET
+    # =========================================================
+
+    def _search(
+        self,
+        query: str
+    ) -> List[Dict[str, str]]:
+        """
+        Effectue une recherche Web via DDGS.
+        """
+
+        raw_results = DDGS().text(
+            query,
+            max_results=self.max_results,
+        )
+
+        results = []
+
+        for item in (
+            raw_results or []
+        ):
+
+            if not isinstance(
+                item,
+                dict
+            ):
+
+                continue
+
+            title = str(
+                item.get(
+                    "title",
+                    ""
+                )
+            ).strip()
+
+            url = str(
+                item.get(
+                    "href",
+                    ""
+                )
+            ).strip()
+
+            snippet = str(
+                item.get(
+                    "body",
+                    ""
+                )
+            ).strip()
+
+            # Résultat totalement vide
+            if (
+                not title
+                and not url
+                and not snippet
+            ):
+
+                continue
+
+            results.append(
+                {
+                    "title": title,
+                    "url": url,
+                    "snippet": snippet,
+                }
+            )
+
+        return results
+
+    # =========================================================
+    # CONTENU
+    # =========================================================
+
+    def _build_content(
+        self,
+        results: List[Dict[str, str]]
+    ) -> str:
+        """
+        Transforme les résultats en texte lisible.
+        """
+
+        blocks = []
 
         for index, result in enumerate(
             results,
             start=1
         ):
 
-            lines.append(
-                f"{index}. {result['title']}"
+            title = result.get(
+                "title",
+                ""
             )
 
-            lines.append(
-                f"   URL : {result['url']}"
+            url = result.get(
+                "url",
+                ""
             )
 
-            if result["snippet"]:
+            snippet = result.get(
+                "snippet",
+                ""
+            )
 
-                lines.append(
-                    f"   Extrait : {result['snippet']}"
-                )
+            block = (
+                f"{index}. {title}\n"
+                f"URL : {url}\n"
+                f"{snippet}"
+            )
 
-        lines.extend(
-            [
-                "",
-                "Utilise uniquement ces résultats comme "
-                "sources web. Signale clairement leurs limites."
-            ]
+            blocks.append(
+                block
+            )
+
+        return "\n\n".join(
+            blocks
         )
 
-        return "\n".join(lines)
+    # =========================================================
+    # CONTEXTE POUR QWEN
+    # =========================================================
+
+    def _build_prompt_context(
+        self,
+        query: str,
+        results: List[Dict[str, str]]
+    ) -> str:
+        """
+        Construit les informations qui pourront être
+        transmises au ResponseManager / modèle local.
+        """
+
+        content = self._build_content(
+            results
+        )
+
+        return (
+            "RECHERCHE WEB ARGOS\n\n"
+            f"Requête utilisateur : {query}\n\n"
+            "Résultats Internet disponibles :\n\n"
+            f"{content}\n\n"
+            "Utilise prioritairement les informations "
+            "ci-dessus pour répondre à la requête. "
+            "N'invente pas de résultat absent de "
+            "la recherche."
+        )
