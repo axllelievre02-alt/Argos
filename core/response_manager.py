@@ -1,6 +1,6 @@
-from ollama import chat
-
 from core.prompt_builder import PromptBuilder
+from core.model_manager import ModelManager, TASK_GENERAL
+from core.models.base import ModelError
 
 
 class ResponseManager:
@@ -24,7 +24,9 @@ class ResponseManager:
         self,
         profile,
         conversation,
-        model="qwen3:4b"
+        model=None,
+        model_manager=None,
+        mode_manager=None,
     ):
 
         # =====================================================
@@ -38,7 +40,11 @@ class ResponseManager:
         # MODELE
         # =====================================================
 
+        # Un modèle explicite reste possible pour les appels ciblés.
+        # Sans cela, ModelManager applique le routage configuré.
         self.model = model
+        self.model_manager = model_manager or ModelManager()
+        self.mode_manager = mode_manager
 
         # =====================================================
         # PROMPT
@@ -83,7 +89,7 @@ class ResponseManager:
         # PROMPT SYSTEME
         # =====================================================
 
-        system_prompt = self.prompt_builder.build()
+        system_prompt = self._build_system_prompt()
 
         system_prompt += """
 
@@ -145,27 +151,23 @@ Produis une réponse naturelle, claire et directement utile.
 
         try:
 
-            response = chat(
+            answer = self.model_manager.generate(
+                messages,
+                task=self._model_task(),
                 model=self.model,
-                messages=messages
             )
 
-        except Exception as error:
+        except ModelError as error:
 
             self._remove_last_user_message()
 
             raise RuntimeError(
-                f"Impossible de contacter le modèle "
-                f"'{self.model}' : {error}"
+                f"Impossible de contacter le modèle : {error}"
             ) from error
 
         # =====================================================
         # REPONSE
         # =====================================================
-
-        answer = self._extract_answer(
-            response
-        )
 
         # =====================================================
         # MEMOIRE
@@ -227,7 +229,7 @@ Produis une réponse naturelle, claire et directement utile.
         # PROMPT SYSTEME
         # =====================================================
 
-        system_prompt = self.prompt_builder.build()
+        system_prompt = self._build_system_prompt()
 
         system_prompt += """
 
@@ -465,27 +467,23 @@ Produis uniquement la réponse finale.
 
         try:
 
-            response = chat(
+            answer = self.model_manager.generate(
+                messages,
+                task=self._model_task(),
                 model=self.model,
-                messages=messages
             )
 
-        except Exception as error:
+        except ModelError as error:
 
             self._remove_last_user_message()
 
             raise RuntimeError(
-                f"Impossible de contacter le modèle "
-                f"'{self.model}' : {error}"
+                f"Impossible de contacter le modèle : {error}"
             ) from error
 
         # =====================================================
         # REPONSE
         # =====================================================
-
-        answer = self._extract_answer(
-            response
-        )
 
         # =====================================================
         # MEMOIRE
@@ -498,36 +496,26 @@ Produis uniquement la réponse finale.
         return answer
 
     # =========================================================
-    # EXTRACTION REPONSE MODELE
+    # MODE ET MODELE
     # =========================================================
 
-    def _extract_answer(self, response):
-        """
-        Extrait proprement le texte retourné par Ollama.
-        """
+    def _build_system_prompt(self):
+        """Construit le prompt de base, enrichi du mode actif."""
 
-        try:
+        prompt = self.prompt_builder.build()
 
-            answer = response["message"]["content"]
+        if self.mode_manager is not None:
+            prompt += "\n\n" + self.mode_manager.prompt_instructions()
 
-        except (
-            KeyError,
-            TypeError
-        ) as error:
+        return prompt
 
-            raise RuntimeError(
-                "Le modèle a renvoyé une réponse invalide."
-            ) from error
+    def _model_task(self):
+        """Retourne la catégorie de modèle associée au mode courant."""
 
-        answer = str(answer).strip()
+        if self.mode_manager is None:
+            return TASK_GENERAL
 
-        if not answer:
-
-            raise RuntimeError(
-                "Le modèle a renvoyé une réponse vide."
-            )
-
-        return answer
+        return self.mode_manager.current_definition().model_task
 
     # =========================================================
     # FORMATAGE DU CONTEXTE
@@ -649,7 +637,9 @@ Produis uniquement la réponse finale.
 
     def get_model(self):
 
-        return self.model
+        return self.model or self.model_manager.configured_model(
+            self._model_task()
+        )
 
     # =========================================================
     # PROMPT
@@ -657,7 +647,7 @@ Produis uniquement la réponse finale.
 
     def get_system_prompt(self):
 
-        return self.prompt_builder.build()
+        return self._build_system_prompt()
 
     # =========================================================
     # MEMOIRE
@@ -687,7 +677,9 @@ Produis uniquement la réponse finale.
 
         return {
 
-            "model": self.model,
+            "model": self.get_model(),
+
+            "last_model": self.model_manager.last_model,
 
             "messages": self.conversation.count(),
 

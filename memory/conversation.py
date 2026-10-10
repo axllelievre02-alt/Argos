@@ -1,3 +1,8 @@
+from pathlib import Path
+
+from memory.store import append_jsonl, read_jsonl, rewrite_jsonl
+
+
 class ConversationMemory:
     """
     Gère l'historique de la conversation actuelle d'ARGOS.
@@ -7,11 +12,22 @@ class ConversationMemory:
     d'exploiter le contexte conversationnel.
     """
 
-    def __init__(self, max_messages=50):
+    def __init__(
+        self,
+        max_messages=50,
+        file_path=None,
+        persist=False,
+    ):
 
         self.max_messages = max_messages
 
+        self.file_path = Path(file_path) if file_path else None
+        self.persist = bool(persist and self.file_path is not None)
+
         self._messages = []
+
+        if self.persist:
+            self._load()
 
     # =========================================================
     # AJOUT DE MESSAGES
@@ -22,28 +38,14 @@ class ConversationMemory:
         Ajoute un message utilisateur.
         """
 
-        self._messages.append(
-            {
-                "role": "user",
-                "content": str(message)
-            }
-        )
-
-        self._limit_history()
+        self._add_message("user", message)
 
     def add_assistant_message(self, message):
         """
         Ajoute une réponse d'ARGOS.
         """
 
-        self._messages.append(
-            {
-                "role": "assistant",
-                "content": str(message)
-            }
-        )
-
-        self._limit_history()
+        self._add_message("assistant", message)
 
     # =========================================================
     # LECTURE
@@ -292,6 +294,49 @@ class ConversationMemory:
 
         self._messages.clear()
 
+        if self.persist:
+            rewrite_jsonl(self.file_path, [])
+
+    # =========================================================
+    # PERSISTANCE
+    # =========================================================
+
+    def _load(self):
+        """Charge les messages valides de la session précédente."""
+
+        for record in read_jsonl(self.file_path, limit=self.max_messages):
+
+            role = record.get("role")
+            content = record.get("content")
+
+            if role not in {"user", "assistant"}:
+                continue
+
+            if not isinstance(content, str) or not content.strip():
+                continue
+
+            self._messages.append({"role": role, "content": content})
+
+        self._limit_history()
+
+    def _add_message(self, role, message):
+        """Ajoute un message et le persiste lorsque cette option est active."""
+
+        record = {"role": role, "content": str(message)}
+
+        self._messages.append(record)
+
+        if self.persist:
+            append_jsonl(self.file_path, record)
+
+        before_limit = len(self._messages)
+        self._limit_history()
+
+        # Si la limite a supprimé des anciens messages, le fichier est
+        # compacté afin de rester cohérent avec la mémoire en cours.
+        if self.persist and len(self._messages) != before_limit:
+            rewrite_jsonl(self.file_path, self._messages)
+
     def _limit_history(self):
 
         if self.max_messages <= 0:
@@ -317,6 +362,8 @@ class ConversationMemory:
         return {
             "messages": self.count(),
             "max_messages": self.max_messages,
+            "persistent": self.persist,
+            "file": str(self.file_path) if self.file_path else None,
             "empty": self.is_empty(),
             "last_message":
                 self.get_last_message(),

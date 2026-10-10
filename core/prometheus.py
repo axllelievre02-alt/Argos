@@ -125,6 +125,28 @@ class Prometheus:
                     }
                 )
 
+            # Une question personnelle explicative a besoin de la
+            # donnée fiable de Knowledge, puis d'une synthèse
+            # pédagogique de cette donnée.
+
+            if (
+                signals.get("academy", False)
+                and self._engine_available("academy")
+            ):
+
+                tasks.append(
+                    {
+                        "engine": "academy",
+
+                        "description": (
+                            "Expliquer l'information personnelle "
+                            "à partir de la mémoire d'ARGOS."
+                        ),
+
+                        "priority": 2
+                    }
+                )
+
         # =====================================================
         # INTERNET
         # =====================================================
@@ -146,6 +168,28 @@ class Prometheus:
                         ),
 
                         "priority": 1
+                    }
+                )
+
+            # Une recherche formulée comme une demande
+            # d'explication doit être synthétisée, pas seulement
+            # transmise sous forme de résultats bruts.
+
+            if (
+                signals.get("academy", False)
+                and self._engine_available("academy")
+            ):
+
+                tasks.append(
+                    {
+                        "engine": "academy",
+
+                        "description": (
+                            "Expliquer les résultats de la "
+                            "recherche Internet à l'utilisateur."
+                        ),
+
+                        "priority": 2
                     }
                 )
 

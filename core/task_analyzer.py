@@ -1,3 +1,6 @@
+import re
+
+
 class TaskAnalyzer:
     """
     Analyse la requête utilisateur avant la prise de décision
@@ -100,12 +103,9 @@ class TaskAnalyzer:
         ]
 
         self.knowledge_keywords = [
-            "mon",
-            "ma",
-            "mes",
             "m'appelle",
             "m appelle",
-            "nom",
+            "mon nom",
             "prénom",
             "prenom",
             "jeu préféré",
@@ -132,6 +132,12 @@ class TaskAnalyzer:
             "et cela",
             "et lui",
             "et elle",
+            "ce jeu",
+            "ce moteur",
+            "cette information",
+            "cette préférence",
+            "cette preference",
+            "je viens de",
             "lequel",
             "laquelle",
             "ce dernier",
@@ -174,7 +180,10 @@ class TaskAnalyzer:
     ):
 
         return any(
-            keyword in text
+            re.search(
+                r"(?<!\w)" + re.escape(keyword) + r"(?!\w)",
+                text
+            ) is not None
             for keyword in keywords
         )
 
@@ -271,7 +280,11 @@ class TaskAnalyzer:
         # INTENTION PRINCIPALE
         # =====================================================
 
-        if knowledge:
+        if contextual and has_conversation:
+
+            intent = "contextual"
+
+        elif knowledge:
 
             intent = "knowledge"
 

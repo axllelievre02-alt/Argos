@@ -174,6 +174,12 @@ class KnowledgeEngine(BaseEngine):
                 "mon moteur prefere",
                 "mon moteur préféré",
 
+                "moteur de jeu prefere",
+                "moteur de jeu préféré",
+
+                "mon moteur de jeu prefere",
+                "mon moteur de jeu préféré",
+
                 "quel est mon moteur",
                 "quelle est mon moteur",
 
@@ -658,6 +664,20 @@ class KnowledgeEngine(BaseEngine):
 
         if not normalized:
             return None
+
+        # Un « moteur de jeu préféré » contient aussi le mot jeu,
+        # mais désigne explicitement le moteur. Cette priorité évite
+        # qu'un alias générique du jeu préféré ne gagne la course.
+
+        if (
+            ("moteur" in normalized or "engine" in normalized)
+            and any(
+                word in normalized
+                for word in ["prefere", "favori", "favorit"]
+            )
+        ):
+
+            return "favorite_engine"
 
         # -----------------------------------------------------
         # Expressions exactes / connues

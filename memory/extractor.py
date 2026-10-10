@@ -128,6 +128,34 @@ class MemoryExtractor:
                 return None
 
         # =====================================================
+        # NOTE IMPORTANTE / MEMOIRE LONGUE DUREE
+        # =====================================================
+
+        important_prefixes = [
+            "je vais te donner une information importante :",
+            "information importante :",
+            "retiens ceci :",
+            "souviens-toi de ceci :"
+        ]
+
+        for prefix in important_prefixes:
+
+            if text.startswith(prefix):
+
+                value = self._clean(
+                    message[len(prefix):]
+                )
+
+                if value:
+
+                    return {
+                        "type": "long_term",
+                        "key": "note : " + value[:80],
+                        "value": value,
+                        "category": "note"
+                    }
+
+        # =====================================================
         # JEU PREFERE
         # =====================================================
 

@@ -1,6 +1,7 @@
 from memory.profile import ProfileMemory
 from memory.conversation import ConversationMemory
 from memory.extractor import MemoryExtractor
+from memory.long_term import LongTermMemory
 
 from core.response_manager import ResponseManager
 from core.engine_manager import EngineManager
@@ -9,6 +10,10 @@ from core.planner import Planner
 from core.executor import Executor
 from core.prometheus import Prometheus
 from core.task_analyzer import TaskAnalyzer
+from core.config import ArgosConfig
+from core.model_manager import ModelManager
+from core.modes import ModeManager
+from core.paths import CONVERSATION_FILE
 
 from engines.knowledge import KnowledgeEngine
 from engines.academy import AcademyEngine
@@ -47,7 +52,14 @@ class Brain:
         Réponse
     """
 
-    def __init__(self):
+    def __init__(self, config=None, conversation_file=None):
+
+        # Les réglages, modes et modèles partagent la même configuration.
+        self.config = config or ArgosConfig()
+
+        self.mode_manager = ModeManager(self.config)
+
+        self.model_manager = ModelManager(self.config)
 
         # =====================================================
         # MEMOIRE DE PROFIL
@@ -59,13 +71,23 @@ class Brain:
         # MEMOIRE DE CONVERSATION
         # =====================================================
 
-        self.conversation = ConversationMemory()
+        self.conversation = ConversationMemory(
+            max_messages=self.config.get("memory.max_messages", 50),
+            file_path=conversation_file or CONVERSATION_FILE,
+            persist=self.config.get("memory.persist_conversation", True),
+        )
 
         # =====================================================
         # EXTRACTION DE MEMOIRE
         # =====================================================
 
         self.memory_extractor = MemoryExtractor()
+
+        # =====================================================
+        # MEMOIRE LONGUE DUREE
+        # =====================================================
+
+        self.long_term_memory = LongTermMemory()
 
         # =====================================================
         # GESTIONNAIRE DES MOTEURS
@@ -146,7 +168,9 @@ class Brain:
 
         self.response_manager = ResponseManager(
             self.profile,
-            self.conversation
+            self.conversation,
+            model_manager=self.model_manager,
+            mode_manager=self.mode_manager,
         )
 
         # =====================================================
@@ -202,6 +226,24 @@ class Brain:
 
             return ""
 
+        # Un changement de mode est une commande ARGOS : il est appliqué
+        # immédiatement, persiste dans la configuration, et ne nécessite
+        # aucune génération par le modèle.
+        changed_mode = self.mode_manager.apply_message(message)
+
+        if changed_mode is not None:
+
+            answer = (
+                f"Mode {changed_mode.label} activé. "
+                "Il restera actif jusqu'à ce que tu reviennes "
+                "en mode normal."
+            )
+
+            self.conversation.add_user_message(message)
+            self.conversation.add_assistant_message(answer)
+
+            return answer
+
         # =====================================================
         # MEMOIRE
         # =====================================================
@@ -233,6 +275,21 @@ class Brain:
                     print(
                         f"✓ Mémoire sauvegardée : "
                         f"{key} = {value}"
+                    )
+
+            elif memory.get("type") == "long_term":
+
+                record = self.long_term_memory.remember(
+                    memory.get("key", ""),
+                    memory.get("value", ""),
+                    category=memory.get("category", "note")
+                )
+
+                if record:
+
+                    print(
+                        "✓ Note longue durée sauvegardée : "
+                        f"{record.get('key')}"
                     )
 
         # =====================================================
@@ -320,11 +377,33 @@ class Brain:
 
         self.last_context = context
 
+        context.set(
+            "long_term_matches",
+            self.long_term_memory.recall(
+                message,
+                limit=3
+            )
+        )
+
         # =====================================================
         # RESULTAT DES MOTEURS
         # =====================================================
 
         result = context.last_result()
+
+        # Une information personnelle reconnue par KnowledgeEngine est
+        # autoritative. Academy peut avoir été exécuté après KnowledgeEngine
+        # pour enrichir le contexte, mais ne doit jamais reformuler ni
+        # contredire un fait ou une préférence déjà mémorisée.
+        knowledge_result = context.get_engine(
+            "knowledge"
+        )
+
+        if self._is_authoritative_knowledge_result(
+            knowledge_result
+        ):
+
+            result = knowledge_result
 
         print(
             "\n===== DEBUG RESULTAT FINAL ====="
@@ -426,6 +505,20 @@ class Brain:
         return response
 
     # =========================================================
+    # PRIORITE DES FAITS MEMORISES
+    # =========================================================
+
+    @staticmethod
+    def _is_authoritative_knowledge_result(result):
+        """Indique si un résultat Knowledge doit être rendu tel quel."""
+
+        return (
+            isinstance(result, dict)
+            and result.get("handled") is True
+            and bool(result.get("content"))
+        )
+
+    # =========================================================
     # PROFIL
     # =========================================================
 
@@ -470,6 +563,15 @@ class Brain:
 
             "conversation":
                 self.conversation.summary(),
+
+            "long_term_memory":
+                self.long_term_memory.summary(),
+
+            "mode":
+                self.mode_manager.summary(),
+
+            "model":
+                self.model_manager.summary(),
 
             "engines":
                 self.engine_manager.names(),

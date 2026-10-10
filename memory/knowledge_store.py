@@ -239,7 +239,7 @@ class KnowledgeStore:
         self,
         query: str,
         limit: int = 5,
-        minimum_score: float = 0.25,
+        minimum_score: float = 0.2,
     ) -> List[Dict[str, Any]]:
         """Retrouve les connaissances proches d'une question."""
 
